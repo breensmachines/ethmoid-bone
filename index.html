@@ -250,7 +250,9 @@ void main(){ vP = pos; vAO = ao; vec3 p = rot*((pos - ctr)*scl + ctr - piv) + pi
 const FS = `#version 300 es
 precision highp float; in vec3 vN; in vec3 vV; in float vAO; uniform vec3 col; uniform float op; uniform float emi; uniform float endoL; uniform float clipX; uniform float clipM; uniform float soft; out vec4 o;
 uniform vec3 clipN; uniform vec3 clipO; uniform vec2 clipR; uniform float clipOn; in vec3 vP; uniform vec3 cutN; uniform vec3 cutO; uniform float cutOn;
-void main(){ if (vP.x < clipX || vP.x < clipM) discard; if (clipOn > .5){ float f = dot(vP - clipO, clipN); if (f > clipR.y || f < clipR.x) discard; } if (cutOn > .5 && dot(vP - cutO, cutN) > 0.) discard; vec3 n = normalize(vN); if(!gl_FrontFacing) n = -n; vec3 v = normalize(vV);
+uniform vec3 off; uniform vec3 eyeW; uniform mat4 vp;
+bool capDepth(){ gl_FragDepth = gl_FragCoord.z; if (clipM < -1e8 || gl_FrontFacing) return false; vec3 em = eyeW - off; float dn = vP.x - em.x; if (abs(dn) < 1e-5) return false; vec3 q = em + (vP - em)*((clipM - em.x)/dn); vec4 c = vp*vec4(q + off, 1.); gl_FragDepth = clamp((c.z/c.w)*0.5 + 0.5, 0., 1.); return true; }
+void main(){ if (vP.x < clipX || vP.x < clipM) discard; if (clipOn > .5){ float f = dot(vP - clipO, clipN); if (f > clipR.y || f < clipR.x) discard; } if (cutOn > .5 && dot(vP - cutO, cutN) > 0.) discard; if (capDepth()){ o = vec4(pow(col*0.72 + 0.04, vec3(0.95)), op); return; } vec3 n = normalize(vN); if(!gl_FrontFacing) n = -n; vec3 v = normalize(vV);
   float d = max(dot(n, v), 0.); float hemi = 0.5 + 0.5*n.y;
   if (endoL > .5){ float dist = length(vV), att = 1./(1. + pow(dist/34., 2.)); float a = mix(1., 0.35 + 0.65*vAO, 0.75);
     vec3 cc = col*(0.10 + 1.05*d*att)*a + vec3(0.28)*pow(max(dot(reflect(-v,n),v),0.),30.)*att*0.6 + col*emi;
@@ -260,7 +262,9 @@ void main(){ if (vP.x < clipX || vP.x < clipM) discard; if (clipOn > .5){ float 
   o = vec4(pow(c, vec3(0.95)), op*mix(1., 0.3 + 0.7*smoothstep(0., 0.75, d), soft)); }`;
 const FS_ID = `#version 300 es
 precision highp float; uniform vec3 col; out vec4 o; uniform float clipX; uniform float clipM; uniform vec3 clipN; uniform vec3 clipO; uniform vec2 clipR; uniform float clipOn; in vec3 vP; uniform vec3 cutN; uniform vec3 cutO; uniform float cutOn;
-void main(){ if (vP.x < clipX || vP.x < clipM) discard; if (clipOn > .5){ float f = dot(vP - clipO, clipN); if (f > clipR.y || f < clipR.x) discard; } if (cutOn > .5 && dot(vP - cutO, cutN) > 0.) discard; o = vec4(col,1.); }`;
+uniform vec3 off; uniform vec3 eyeW; uniform mat4 vp;
+bool capDepth(){ gl_FragDepth = gl_FragCoord.z; if (clipM < -1e8 || gl_FrontFacing) return false; vec3 em = eyeW - off; float dn = vP.x - em.x; if (abs(dn) < 1e-5) return false; vec3 q = em + (vP - em)*((clipM - em.x)/dn); vec4 c = vp*vec4(q + off, 1.); gl_FragDepth = clamp((c.z/c.w)*0.5 + 0.5, 0., 1.); return true; }
+void main(){ capDepth(); if (vP.x < clipX || vP.x < clipM) discard; if (clipOn > .5){ float f = dot(vP - clipO, clipN); if (f > clipR.y || f < clipR.x) discard; } if (cutOn > .5 && dot(vP - cutO, cutN) > 0.) discard; o = vec4(col,1.); }`;
 const FS_FLAT = `#version 300 es
 precision highp float; uniform vec3 col; uniform float op; out vec4 o; void main(){ o = vec4(col,op); }`;
 let P_MAIN, P_ID, P_FLAT;
@@ -273,7 +277,10 @@ function eye(){ return V3.add(cam.target, V3.mul(camBasis().z, cam.dist)); }
 function viewMat(){ const b = camBasis(), e = eye();
   return [b.x[0],b.y[0],b.z[0],0, b.x[1],b.y[1],b.z[1],0, b.x[2],b.y[2],b.z[2],0, -V3.dot(b.x,e),-V3.dot(b.y,e),-V3.dot(b.z,e),1]; }
 let ASP = null; const aspect = () => ASP || canvas.width/canvas.height;
-function projMat(){ const nr = (typeof section !== 'undefined' && section && section.endo && section.endo.near) ? section.endo.near : Math.max(cam.dist*0.05, 0.5); return perspective(cam.fov, aspect(), nr, cam.dist*6 + 500); }
+// endoscope: the visible circle keeps a fixed share of the window and a fixed angular field, whatever the window shape
+function scopeR(){ const W = canvas.clientWidth || 1, H = canvas.clientHeight || 1; return Math.max(Math.min(W, H)/2, 0.31*Math.hypot(W, H)); }
+function effFov(){ if (!(typeof section !== 'undefined' && section && section.endo)) return cam.fov; const H = canvas.clientHeight || 1; return 2*Math.atan(Math.tan(cam.fov/2)*(H/2)/scopeR()); }
+function projMat(){ const nr = (typeof section !== 'undefined' && section && section.endo && section.endo.near) ? section.endo.near : Math.max(cam.dist*0.05, 0.5); return perspective(effFov(), aspect(), nr, cam.dist*6 + 500); }
 const VIEWS = {ant:[[0,0,1],[0,1,0]], post:[[0,0,-1],[0,1,0]], latL:[[1,0,0],[0,1,0]], latR:[[-1,0,0],[0,1,0]], inf:[[0,-1,0],[0,0,1]], sup:[[0,1,0],[0,0,1]]};
 // views are defined in the Frankfort-horizontal frame (porions + left orbitale; midsagittal plane vertical)
 const FHM = v => { const F = EXTRA.fh; return V3.norm(V3.add(V3.add(V3.mul(F.X, v[0]), V3.mul(F.S, v[1])), V3.mul(F.A, v[2]))); };
@@ -368,6 +375,7 @@ function setCommon(p, vp, view){
   if (p !== P_FLAT){ const cp = cutPlane(); gl.uniform3fv(uni(p,'cutN'), cp.n); gl.uniform3fv(uni(p,'cutO'), cp.o); gl.uniform1f(uni(p,'cutOn'), cut.on ? 1 : 0); }
   if (p !== P_FLAT){ const c = EXTRA.clip; gl.uniform3fv(uni(p,'clipN'), c.n); gl.uniform3fv(uni(p,'clipO'), c.o); gl.uniform2fv(uni(p,'clipR'), [c.lo, c.hi]); gl.uniform1f(uni(p,'clipOn'), clipOn ? 1 : 0); }
   gl.uniformMatrix4fv(uni(p,'vp'), false, vp); gl.uniformMatrix4fv(uni(p,'view'), false, view);
+  if (p !== P_FLAT){ const t = [view[12], view[13], view[14]]; gl.uniform3fv(uni(p,'eyeW'), [0,1,2].map(i => -(view[i*4]*t[0] + view[i*4+1]*t[1] + view[i*4+2]*t[2]))); }
 }
 const I3 = [1,0,0, 0,1,0, 0,0,1];
 function drawMesh(p, m){ if (p !== P_FLAT) gl.uniform1f(uni(p,'clipM'), meshClip(m.id)); gl.uniformMatrix3fv(uni(p,'rot'), false, m.R || I3); gl.uniform3fv(uni(p,'piv'), m.piv || [0,0,0]); gl.uniform3fv(uni(p,'off'), m.off); gl.uniform1f(uni(p,'scl'), 1); gl.uniform3fv(uni(p,'ctr'), [0,0,0]); gl.bindVertexArray(m.cur.vao); gl.drawElements(gl.TRIANGLES, m.cur.n, gl.UNSIGNED_INT, 0); }
@@ -430,8 +438,10 @@ function visiblePts(vp, ids, W, H){
   for (const m of Object.values(meshes)){ if (!m.vis || m.op < 0.5 || m.ghost) continue; gl.uniform3fv(uni(P_ID,'col'), [m.id/255, 0, 0]); drawMesh(P_ID, m); }
   const px = new Uint8Array(w*h*4); gl.readPixels(0, 0, w, h, gl.RGBA, gl.UNSIGNED_BYTE, px);
   gl.bindFramebuffer(gl.FRAMEBUFFER, null); gl.viewport(0, 0, canvas.width, canvas.height); gl.clearColor(0,0,0,0);
-  const acc = {};
-  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++){ const k = (y*w + x)*4; if (!px[k+3]) continue; const id = px[k]; if (!want.has(id)) continue; const a = acc[id] || (acc[id] = [0,0,0,[]]); a[0]++; a[1] += x; a[2] += y; if ((x + y) % 2 === 0) a[3].push(x, y); }
+  const acc = {}; let yMin = 0, yMax = h;   // skip pixels hidden behind the overlaid toolbars
+  { const cr = canvas.getBoundingClientRect(), sy = h/(cr.height || 1);
+    document.querySelectorAll('#v3d .views, #clipOv, #pushOv').forEach(el => { if (!el.offsetParent) return; const r = el.getBoundingClientRect(); if (r.bottom > cr.bottom - cr.height*0.3) yMin = Math.max(yMin, Math.ceil((cr.bottom - r.top)*sy) + 2); else if (r.top < cr.top + cr.height*0.3) yMax = Math.min(yMax, Math.floor((cr.bottom - r.bottom)*sy) - 2); }); }
+  for (let y = yMin; y < yMax; y++) for (let x = 0; x < w; x++){ const k = (y*w + x)*4; if (!px[k+3]) continue; const id = px[k]; if (!want.has(id)) continue; const a = acc[id] || (acc[id] = [0,0,0,[]]); a[0]++; a[1] += x; a[2] += y; if ((x + y) % 2 === 0) a[3].push(x, y); }
   const out = {};
   for (const id in acc){ const a = acc[id]; if (a[0] < 5) continue; const mx = a[1]/a[0], my = a[2]/a[0]; let bd = 1e18, bx = mx, by = my;
     // snap to a visible pixel near the centre, preferring pixels well inside the region
@@ -504,7 +514,9 @@ function drawDots(vp, view){
   }
   gl.enable(gl.DEPTH_TEST); gl.depthMask(true); gl.disable(gl.BLEND);
 }
+let _mkR = 0;
 function render(){
+  if (section && section.endo){ const r = Math.round(scopeR()); if (r !== _mkR){ _mkR = r; const mk = document.getElementById('endoMask'); if (mk) mk.style.background = `radial-gradient(circle ${r}px at 50% 50%, rgba(0,0,0,0) ${Math.round(r*0.8)}px, rgba(0,0,0,.55) ${Math.round(r*0.92)}px, #000 ${r}px)`; } }
   gl.bindFramebuffer(gl.FRAMEBUFFER, null); gl.viewport(0, 0, canvas.width, canvas.height);
   if (section && section.endo && renderMode === 'surface'){ const bc = section.endo.bg || [0.16,0.05,0.05]; gl.clearColor(bc[0], bc[1], bc[2], 1); } else gl.clearColor(0, 0, 0, 0); gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
   if (STU() && !section.studio.spin){ drawScene(); }
@@ -672,7 +684,7 @@ function renderVolume(){
   gl.activeTexture(gl.TEXTURE2); gl.bindTexture(gl.TEXTURE_2D, texLUT); gl.uniform1i(uni(P_VOL,'lut'), 2);
   gl.activeTexture(gl.TEXTURE0);
   gl.uniform3fv(uni(P_VOL,'eye'), eye()); gl.uniform3fv(uni(P_VOL,'bx'), b.x); gl.uniform3fv(uni(P_VOL,'by'), b.y); gl.uniform3fv(uni(P_VOL,'bz'), b.z);
-  gl.uniform1f(uni(P_VOL,'tanf'), Math.tan(cam.fov/2)); gl.uniform1f(uni(P_VOL,'asp'), aspect());
+  gl.uniform1f(uni(P_VOL,'tanf'), Math.tan(effFov()/2)); gl.uniform1f(uni(P_VOL,'asp'), aspect());
   // display p -> tex: s=((x + C0x - ipp0)/px + .5)/NX ; t=((-z + C0y - ipp1)/px + .5)/NY ; r=((y + C0z - ipp2)/dz + .5)/NZ
   gl.uniform3fv(uni(P_VOL,'sA'), [1/(Vm.px*NX), 1/(Vm.px*NY), 1/(Vm.dz*NZ)]);
   gl.uniform3fv(uni(P_VOL,'sB'), [((C0[0]-Vm.ipp[0])/Vm.px + .5)/NX, ((C0[1]-Vm.ipp[1])/Vm.px + .5)/NY, ((C0[2]-Vm.ipp[2])/Vm.dz + .5)/NZ]);
@@ -724,7 +736,7 @@ function rayAt(cx, cy){
   const q0 = cam.q;
   if (STU() && section.studio.spin){ nx = (cx - r.left)/(r.width/2)*2 - 1; asp = (r.width/2)/r.height; }
   else if (section.split){ const top = (cy - r.top) < r.height/2; cam.q = top ? q0 : qFlip(); asp = r.width/(r.height/2); const fy = ((cy - r.top) - (top ? 0 : r.height/2))/(r.height/2); ny = -(fy*2 - 1); }
-  const t = Math.tan(cam.fov/2), b = camBasis();
+  const t = Math.tan(effFov()/2), b = camBasis();
   const d = V3.norm(V3.add(V3.add(V3.mul(b.x, nx*t*asp), V3.mul(b.y, ny*t)), V3.mul(b.z, -1)));
   const o = eye(); cam.q = q0; return {o, d};
 }
@@ -755,7 +767,7 @@ canvas.addEventListener('pointerdown', e => { if (touches.size > 1) return; canv
 canvas.addEventListener('pointermove', e => {
   if (drag){
     const dx = e.clientX - drag.x, dy = e.clientY - drag.y; drag.x = e.clientX; drag.y = e.clientY;
-    if (drag.pan){ const b = camBasis(), s = cam.dist*Math.tan(cam.fov/2)*2/canvas.clientHeight; cam.target = V3.add(cam.target, V3.add(V3.mul(b.x, -dx*s), V3.mul(b.y, dy*s))); }
+    if (drag.pan){ const b = camBasis(), s = cam.dist*Math.tan(effFov()/2)*2/canvas.clientHeight; cam.target = V3.add(cam.target, V3.add(V3.mul(b.x, -dx*s), V3.mul(b.y, dy*s))); }
     else { const l = Math.hypot(dx, dy); if (l){ const ax = Q.rot(cam.q, [dy/l, dx/l, 0]); cam.q = Q.norm(Q.mul(Q.axis(ax, -l*0.0085), cam.q)); } }
     dirty = true; return;
   }
