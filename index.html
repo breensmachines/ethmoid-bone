@@ -876,9 +876,9 @@ function jawPose(t){
 /* ---- elastic medialisation (endoscopic tour) ---- */
 let pushVal = 0; const DEFORMED = new Set(); let endoLight = true, endoAO = null; const ENDO = {};
 let endoMeshP = null;
-function loadEndoMeshes(){ return endoMeshP ||= (async () => { const r = await fetch('endo_meshes.txt'); if (!r.ok) return;
+function loadEndoMeshes(){ return endoMeshP ||= (async () => { for (const fn of ['endo_meshes.txt', 'endo_meshes2.txt']){ const r = await fetch(fn); if (!r.ok) continue;
   const ab = await gunzip(b64(await r.text()));
-  parseMeshes(ab, (id, g, cen, lo, hi) => { meshes[id] = {id, lo: g, hi: g, cur: g, cen, anchor: meatAnchor(g.pos), lo3: lo, hi3: hi, bone: 'Mucosa', off:[0,0,0], vis:false, op:1, contra: false}; }); })(); }
+  parseMeshes(ab, (id, g, cen, lo, hi) => { meshes[id] = {id, lo: g, hi: g, cur: g, cen, anchor: meatAnchor(g.pos), lo3: lo, hi3: hi, bone: 'Mucosa', off:[0,0,0], vis:false, op:1, contra: false}; }); } })(); }
 async function loadEndoAO(){
   if (endoAO) return endoAO; endoAO = (async () => { await loadEndoMeshes(); const r = await fetch('endo_ao.txt'); if (!r.ok) return;
     const ab = await gunzip(b64(await r.text())), dv = new DataView(ab); let o = 0;
